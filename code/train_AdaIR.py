@@ -73,7 +73,6 @@ def main():
         logger = TensorBoardLogger(save_dir="logs/")
 
     trainset = TrainDataset(opt)
-    valset = ValDataset(opt)
     checkpoint_callback_train = ModelCheckpoint(
         dirpath=opt.ckpt_dir,
         filename="train-psnr-{epoch:03d}-{train_psnr:.2f}",
@@ -98,14 +97,6 @@ def main():
         drop_last=True,
         num_workers=opt.num_workers
     )
-    valloader = DataLoader(
-        valset,
-        batch_size=opt.batch_size,
-        pin_memory=True,
-        shuffle=False,
-        drop_last=False,
-        num_workers=opt.num_workers
-    )
 
     model = AdaIRModel(opt)
 
@@ -113,15 +104,14 @@ def main():
         max_epochs=opt.epochs,
         accelerator="gpu",
         devices=opt.num_gpus,
-        strategy="ddp_find_unused_parameters_true",
+        # strategy="ddp_find_unused_parameters_true",
         logger=logger,
-        callbacks=[checkpoint_callback_train, checkpoint_callback_val],
-        precision='16-mixed',
+        callbacks=[checkpoint_callback_train],
+        # precision='16-mixed',
         val_check_interval=1.0,
         accumulate_grad_batches=1,
     )
-    trainer.fit(model=model,
-                train_dataloaders=trainloader, val_dataloaders=valloader)
+    trainer.fit(model=model, train_dataloaders=trainloader)
 
 
 if __name__ == '__main__':
