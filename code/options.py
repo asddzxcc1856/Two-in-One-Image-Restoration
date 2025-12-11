@@ -35,7 +35,14 @@ parser.add_argument("--wblogger", type=str, default="promptir",
                     help="Determine to log to wandb project name")
 parser.add_argument("--ckpt_dir", type=str, default="train_ckpt",
                     help="Where the checkpoint is to be saved")
-parser.add_argument("--num_gpus", type=int, default=2,
+parser.add_argument("--num_gpus", type=int, default=1,
                     help="Number of GPUs to use for training")
+
+parser.add_argument("--use_cutmix", type=int, default=True,
+                    help="Whether to apply CutMix data augmentation (0 or 1)")
+parser.add_argument("--use_mixup", type=bool, default=False,
+                    help="Whether to apply MixUp data augmentation")
+parser.add_argument("--mixup_alpha", type=float, default=0.2,
+                    help="Alpha value for MixUp (controls interpolation strength)")
 
 options = parser.parse_args()
