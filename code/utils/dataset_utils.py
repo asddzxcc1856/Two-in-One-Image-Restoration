@@ -8,6 +8,7 @@ from torchvision.transforms import ToPILImage, Compose, RandomCrop, ToTensor
 
 from utils.image_utils import random_augmentation, crop_img
 from utils.degradation_utils import Degradation
+import torch
 
 
 class TrainDataset(Dataset):
@@ -85,11 +86,9 @@ class TrainDataset(Dataset):
 
     def _get_gt_name_rain(self, rainy_name):
         if "rain-" in rainy_name:
-            gt_name = rainy_name.split("rainy")[0]
-            + 'gt/rain_clean-' + rainy_name.split('rain-')[-1]
+            gt_name = rainy_name.split("rainy")[0] + 'gt/rain_clean-' + rainy_name.split('rain-')[-1]
         elif "snow-" in rainy_name:
-            gt_name = rainy_name.split("rainy")[0]
-            +'gt/snow_clean-' + rainy_name.split('snow-')[-1]
+            gt_name = rainy_name.split("rainy")[0] +'gt/snow_clean-' + rainy_name.split('snow-')[-1]
         # gt_name = rainy_name.split("rainy")[0]
         # + 'gt/rain_clean-' + rainy_name.split('rain-')[-1]
         else:
@@ -112,6 +111,47 @@ class TrainDataset(Dataset):
             self.sample_ids += self.snow_ids
 
         print(len(self.sample_ids))
+    def _apply_cutmix(self, degrad_patch, clean_patch, alpha=1.0):
+        lam = np.random.beta(alpha, alpha)
+
+        B, C, H, W = degrad_patch.size()
+
+        # 隨機裁剪一塊區域
+        cut_rat = np.sqrt(1.0 - lam)
+        cut_w = int(W * cut_rat)
+        cut_h = int(H * cut_rat)
+
+        cx = np.random.randint(W)
+        cy = np.random.randint(H)
+
+        x1 = np.clip(cx - cut_w // 2, 0, W)
+        y1 = np.clip(cy - cut_h // 2, 0, H)
+        x2 = np.clip(cx + cut_w // 2, 0, W)
+        y2 = np.clip(cy + cut_h // 2, 0, H)
+
+        rand_index = torch.randperm(B)
+
+        degrad_patch[:, :, y1:y2, x1:x2] = degrad_patch[rand_index, :, y1:y2, x1:x2]
+        clean_patch[:, :, y1:y2, x1:x2] = clean_patch[rand_index, :, y1:y2, x1:x2]
+
+        lam = 1 - ((x2 - x1) * (y2 - y1) / (W * H))
+
+        return degrad_patch, clean_patch, lam
+
+    def _apply_mixup(self, degrad_patch, clean_patch, alpha=0.4):
+        """对一批图像应用 MixUp"""
+        if alpha <= 0:
+            return degrad_patch, clean_patch, 1.0
+
+        lam = np.random.beta(alpha, alpha)
+
+        B, C, H, W = degrad_patch.size()
+        rand_index = torch.randperm(B)
+
+        degrad_patch_mix = lam * degrad_patch + (1 - lam) * degrad_patch[rand_index]
+        clean_patch_mix = lam * clean_patch + (1 - lam) * clean_patch[rand_index]
+
+        return degrad_patch_mix, clean_patch_mix, lam
 
     def __getitem__(self, idx):
         sample = self.sample_ids[idx]
@@ -132,10 +172,31 @@ class TrainDataset(Dataset):
         degrad_patch, clean_patch = random_augmentation(
             *self._crop_patch(degrad_img, clean_img))
 
-        clean_patch = self.toTensor(clean_patch)
         degrad_patch = self.toTensor(degrad_patch)
+        clean_patch = self.toTensor(clean_patch)
+
+        # --- CutMix ---
+        if self.args.use_cutmix:
+            degrad_patch, clean_patch, lam_cutmix = self._apply_cutmix(
+                degrad_patch.unsqueeze(0),
+                clean_patch.unsqueeze(0)
+            )
+            degrad_patch = degrad_patch.squeeze(0)
+            clean_patch = clean_patch.squeeze(0)
+
+        # --- MixUp ---
+        if self.args.use_mixup:
+            degrad_patch, clean_patch, lam_mixup = self._apply_mixup(
+                degrad_patch.unsqueeze(0),
+                clean_patch.unsqueeze(0),
+                alpha=self.args.mixup_alpha
+            )
+            degrad_patch = degrad_patch.squeeze(0)
+            clean_patch = clean_patch.squeeze(0)
+
 
         return [clean_name, de_id], degrad_patch, clean_patch
+
 
     def __len__(self):
         return len(self.sample_ids)
